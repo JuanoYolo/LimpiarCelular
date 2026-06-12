@@ -1,7 +1,12 @@
 package com.example.appcleaneradvisor.ui
 
+import android.content.Context
 import android.graphics.drawable.Drawable
+import android.net.Uri
+import android.widget.Toast
 import android.widget.ImageView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +62,7 @@ import com.example.appcleaneradvisor.data.AppUsageInfo
 import com.example.appcleaneradvisor.data.RecommendationType
 import com.example.appcleaneradvisor.ui.theme.AppCleanerTheme
 import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -63,6 +70,23 @@ import java.util.concurrent.TimeUnit
 @Composable
 fun AppCleanerAdvisorApp(viewModel: AppCleanerViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var pendingReportCsv by remember { mutableStateOf<String?>(null) }
+    val reportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        val csv = pendingReportCsv
+        pendingReportCsv = null
+        if (uri == null || csv == null) return@rememberLauncherForActivityResult
+
+        val saved = writeTextToUri(context = context, uri = uri, text = csv)
+        Toast.makeText(
+            context,
+            if (saved) "Informe guardado" else "No se pudo guardar el informe",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
     AppCleanerTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (!state.hasUsageAccess) {
@@ -75,7 +99,15 @@ fun AppCleanerAdvisorApp(viewModel: AppCleanerViewModel) {
                     onHideSystemAppsChange = viewModel::setHideSystemApps,
                     onOnlyDeleteCandidatesChange = viewModel::setOnlyDeleteCandidates,
                     onUnusedDaysFilterChange = viewModel::setUnusedDaysFilter,
-                    onAppClick = viewModel::openAppDetails
+                    onAppClick = viewModel::openAppDetails,
+                    onExportReport = {
+                        if (!viewModel.hasReportData()) {
+                            Toast.makeText(context, "Primero carga la lista de apps", Toast.LENGTH_LONG).show()
+                        } else {
+                            pendingReportCsv = viewModel.buildFullReportCsv()
+                            reportLauncher.launch(reportFileName())
+                        }
+                    }
                 )
             }
         }
@@ -122,7 +154,8 @@ private fun AppListScreen(
     onHideSystemAppsChange: (Boolean) -> Unit,
     onOnlyDeleteCandidatesChange: (Boolean) -> Unit,
     onUnusedDaysFilterChange: (Int?) -> Unit,
-    onAppClick: (String) -> Unit
+    onAppClick: (String) -> Unit,
+    onExportReport: () -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -164,12 +197,25 @@ private fun AppListScreen(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
-                Text(
-                    text = "${state.visibleApps.size} de ${state.totalApps} apps",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${state.visibleApps.size} de ${state.totalApps} apps",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedButton(
+                        onClick = onExportReport,
+                        enabled = state.totalApps > 0
+                    ) {
+                        Text("Guardar CSV")
+                    }
+                }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -426,4 +472,17 @@ private fun formatBytes(bytes: Long?): String {
     } else {
         String.format(Locale.getDefault(), "%.0f MB", mb)
     }
+}
+
+private fun writeTextToUri(context: Context, uri: Uri, text: String): Boolean =
+    runCatching {
+        context.contentResolver.openOutputStream(uri)?.bufferedWriter(Charsets.UTF_8).use { writer ->
+            requireNotNull(writer) { "No output stream" }
+            writer.write(text)
+        }
+    }.isSuccess
+
+private fun reportFileName(): String {
+    val stamp = SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date())
+    return "app-cleaner-advisor-$stamp.csv"
 }

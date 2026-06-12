@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class AppCleanerViewModel(application: Application) : AndroidViewModel(application) {
@@ -93,6 +95,49 @@ class AppCleanerViewModel(application: Application) : AndroidViewModel(applicati
         publishVisibleApps()
     }
 
+    fun buildFullReportCsv(): String {
+        val header = listOf(
+            "app_name",
+            "package_name",
+            "app_type",
+            "recommendation",
+            "critical_reason",
+            "last_used",
+            "days_since_last_use",
+            "usage_7d_minutes",
+            "usage_30d_minutes",
+            "usage_90d_minutes",
+            "size_mb",
+            "candidate_score",
+            "reasons"
+        )
+
+        val rows = allApps
+            .sortedWith(SortOption.BEST_DELETE_CANDIDATE.comparator)
+            .map { app ->
+                listOf(
+                    app.appName,
+                    app.packageName,
+                    if (app.isSystemApp) "system" else "user",
+                    app.recommendation.label,
+                    app.criticalReason.orEmpty(),
+                    app.lastTimeUsedMillis.toIsoText(),
+                    app.daysSinceLastUse()?.toString().orEmpty(),
+                    app.usage7DaysMillis.toMinutesText(),
+                    app.usage30DaysMillis.toMinutesText(),
+                    app.usage90DaysMillis.toMinutesText(),
+                    app.sizeBytes.toMegabytesText(),
+                    app.candidateScore.toString(),
+                    app.recommendationReasons.joinToString(" / ")
+                )
+            }
+
+        return (listOf(header) + rows)
+            .joinToString(separator = "\n") { row -> row.joinToString(separator = ",") { it.csvCell() } }
+    }
+
+    fun hasReportData(): Boolean = allApps.isNotEmpty()
+
     private fun publishVisibleApps(isLoading: Boolean = _uiState.value.isLoading) {
         val state = _uiState.value
         val visible = allApps
@@ -122,6 +167,20 @@ class AppCleanerViewModel(application: Application) : AndroidViewModel(applicati
             ?.let { TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis() - it).coerceAtLeast(0L) }
 
         return installedDays == null || installedDays >= thresholdDays
+    }
+
+    private fun Long?.toIsoText(): String =
+        this?.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }.orEmpty()
+
+    private fun Long.toMinutesText(): String =
+        String.format(Locale.US, "%.2f", this / 60_000.0)
+
+    private fun Long?.toMegabytesText(): String =
+        this?.let { String.format(Locale.US, "%.2f", it / 1_000_000.0) }.orEmpty()
+
+    private fun String.csvCell(): String {
+        val escaped = replace("\"", "\"\"")
+        return "\"$escaped\""
     }
 }
 

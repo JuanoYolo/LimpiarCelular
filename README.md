@@ -9,6 +9,7 @@ App Android local en Kotlin + Jetpack Compose para revisar aplicaciones instalad
 - Intenta calcular tamano aproximado con `StorageStatsManager`.
 - Guia al usuario para activar Usage Access.
 - Clasifica apps como `Mantener`, `Revisar`, `Candidata a borrar` o `No tocar`.
+- Exporta un informe CSV con todas las apps cargadas para revisarlo fuera del celular.
 - Nunca desinstala apps automaticamente.
 - Abre la pantalla de ajustes de cada app al tocarla.
 
